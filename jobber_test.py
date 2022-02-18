@@ -28,12 +28,12 @@ def __helper():
 # Below some tasks
 # Each task has its dependencies defined as an array passed as decorator
 # argument.
-@jobberd()
+@jobberd([],2)
 def l_function_a():
     results['l_function_a'] = __helper()
 
 
-@jobberd()
+@jobberd([],2)
 def l_function_b():
     results['l_function_b'] = __helper()
 
@@ -44,7 +44,7 @@ def f_function_a():
         + results['l_function_a']
 
 
-@jobberd(['l_function_b'])
+@jobberd(['l_function_b'],2)
 def f_function_b():
     results['f_function_b'] = __helper()\
         + results['l_function_b']
@@ -66,7 +66,7 @@ def f_function_c():
 
 # Use the following decorator to generate circular dependency
 #@jobberd(['l_function_a','f_function_c'])
-@jobberd(['l_function_a','f_function_b'])
+@jobberd(['l_function_a','f_function_b'],2)
 def f_function_d():
     results['f_function_d'] = __helper()\
         + results['l_function_a']\

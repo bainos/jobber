@@ -9,6 +9,14 @@ FAIL = "FAIL"
 NOT_FOUND = "NOT_FOUND"
 
 
+class CircularDependencyException(Exception):
+    pass
+
+
+class DependencyNotFound(Exception):
+    pass
+
+
 class JLogger:
     def __get_time(self):
         return time.strftime("%H:%M:%S", time.gmtime())
@@ -42,10 +50,12 @@ class Jobber:
         self.concurrency = concurrency
 
 
-    def decorator(self,dependencies=[]):
+    def decorator(self,dependencies=[],parallelism=1):
         def registrar(func):
-            self.registry[func.__name__] = func
-            self.dependency_tree[func.__name__] = set(dependencies)
+            for i in range(parallelism):
+                deps = [d+str(i) for d in dependencies]
+                self.registry[func.__name__ + str(i)] = func
+                self.dependency_tree[func.__name__ + str(i)] = set(deps)
             return func
 
         return registrar
@@ -59,13 +69,30 @@ class Jobber:
         d = Dependencies(self.dependency_tree)
         try:
             return d.resolve()
-        except Exception as e:
+        except CircularDependencyException as e:
             loop = e.args[0]['loop']
             node = e.args[0]['node']
+            message = e.args[0]['message']
+            counter = e.args[0]['dependencies']
             err_msg = "Circular dependency detected"\
                     + f" between {loop} and {node}\n"\
                     + f"  {loop}: {self.dependency_tree[loop]}\n"\
-                    + f"  {node}: {self.dependency_tree[node]}"
+                    + f"  {node}: {self.dependency_tree[node]}i\n"\
+                    + f"  message: {message}\n"\
+                    + f"  recursion counter: {counter}"
+            jlog.err(err_msg)
+            raise SystemExit(1)
+        except DependencyNotFound as e:
+            loop = e.args[0]['loop']
+            node = e.args[0]['node']
+            message = e.args[0]['message']
+            counter = e.args[0]['dependencies']
+            err_msg = "Dependency not found. Check parallelism"\
+                    + f" and/or depencies name\n"\
+                    + f"  {loop}: {self.dependency_tree[loop]}\n"\
+                    + f"  {node}: {self.dependency_tree[node]}\n"\
+                    + f"  message: {message}\n"\
+                    + f"  recursion counter: {counter}"
             jlog.err(err_msg)
             raise SystemExit(1)
 
@@ -122,18 +149,25 @@ class Dependencies:
     def dep_resolve(self, node, counter=[]):
         """ todo """
         if len(counter) > len(node.edges) + 1:
-            raise Exception({
+            raise CircularDependencyException({
                 "message": f"Recursion limit reached",
                 "loop": node.name,
                 "node": self.current_node,
-                "dpendencies": counter,
+                "dependencies": counter,
             })
 
         for edge in node.edges:
-            if edge.name not in self.resolved:
-                counter.append(node.name)
-                self.dep_resolve(self.nodes[edge.name], counter)
-
+            try:
+                if edge.name not in self.resolved:
+                    counter.append(node.name)
+                    self.dep_resolve(self.nodes[edge.name], counter)
+            except KeyError:
+                raise DependencyNotFound({
+                    "message": f"{edge.name}: dependency not found",
+                    "loop": node.name,
+                    "node": self.current_node,
+                    "dependencies": counter,
+                })
 
         if node.name not in self.resolved:
             self.resolved.append(node.name)
