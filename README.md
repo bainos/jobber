@@ -3,8 +3,12 @@
 This tool allows to execute a function inside a thread and provides
 an easy way to manage dependencies beetween a functions pool.
 Any function can also be run in multiple parallel copies.
+It's possible to define one or more dependencies for each function
+and Jobber will buid and optimize the dependy tree calculating
+which functions can be executed in parallel.
 
-See `jobber_test.py`
+Take a look at `jobber_test.py` to have an example of the power
+of Jobber!
 
 ## Quick start
 
