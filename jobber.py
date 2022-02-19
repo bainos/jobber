@@ -76,9 +76,9 @@ class Jobber:
             counter = e.args[0]['dependencies']
             err_msg = "Circular dependency detected"\
                     + f" between {loop} and {node}\n"\
+                    + f"  message: {message}\n"\
                     + f"  {loop}: {self.dependency_tree[loop]}\n"\
                     + f"  {node}: {self.dependency_tree[node]}i\n"\
-                    + f"  message: {message}\n"\
                     + f"  recursion counter: {counter}"
             jlog.err(err_msg)
             raise SystemExit(1)
@@ -89,9 +89,9 @@ class Jobber:
             counter = e.args[0]['dependencies']
             err_msg = "Dependency not found. Check parallelism"\
                     + f" and/or depencies name\n"\
+                    + f"  message: {message}\n"\
                     + f"  {loop}: {self.dependency_tree[loop]}\n"\
                     + f"  {node}: {self.dependency_tree[node]}\n"\
-                    + f"  message: {message}\n"\
                     + f"  recursion counter: {counter}"
             jlog.err(err_msg)
             raise SystemExit(1)
@@ -184,6 +184,11 @@ class Dependencies:
 
 
     def resolve(self):
+        self.nodes = {}
+        self.resolved = []
+        self.ordered_dep_tree = []
+        self.tmp = {}
+
         for task in self.dep_tree:
             self.processTable(task)
 

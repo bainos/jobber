@@ -30,24 +30,40 @@ def __helper():
 # argument.
 @jobberd([],2)
 def l_function_a():
-    results['l_function_a'] = __helper()
+    try:
+        results['l_function_a'] =\
+            results['l_function_a'] + __helper()
+    except:
+        results['l_function_a'] = __helper()
 
 
 @jobberd([],2)
 def l_function_b():
-    results['l_function_b'] = __helper()
+    try:
+        results['l_function_b'] =\
+            results['l_function_b'] + __helper()
+    except:
+        results['l_function_b'] = __helper()
 
 
 @jobberd(['l_function_a'])
 def f_function_a():
-    results['f_function_a'] = __helper()\
-        + results['l_function_a']
+    try:
+        results['f_function_a'] = __helper()\
+            + results['f_function_a'] + results['l_function_a']
+    except:
+        results['f_function_a'] = __helper()\
+            + results['l_function_a']
 
 
 @jobberd(['l_function_b'],2)
 def f_function_b():
-    results['f_function_b'] = __helper()\
-        + results['l_function_b']
+    try:
+        results['f_function_b'] = __helper()\
+            + results['f_function_b'] + results['l_function_b']
+    except:
+        results['f_function_b'] = __helper()\
+            + results['l_function_b']
 
 
 # The following function:
@@ -68,9 +84,15 @@ def f_function_c():
 #@jobberd(['l_function_a','f_function_c'])
 @jobberd(['l_function_a','f_function_b'],2)
 def f_function_d():
-    results['f_function_d'] = __helper()\
-        + results['l_function_a']\
-        + results['f_function_b']
+    try:
+        results['f_function_d'] = __helper()\
+            + results['f_function_d']\
+            + results['l_function_a']\
+            + results['f_function_b']
+    except:
+        results['f_function_d'] = __helper()\
+            + results['l_function_a']\
+            + results['f_function_b']
 
 
 if __name__ == '__main__':
@@ -86,6 +108,13 @@ if __name__ == '__main__':
     jlog = JLogger()
 
     print("\n\n")
+    jlog.header("TASKS LIST")
+    i = 0
+    for task in jobber.get_dependencies():
+        print(f"Task {i}: {str(task)}")
+        i = i + 1
+
+    print("\n")
     jlog.header("REPORT")
     print(report)
 
