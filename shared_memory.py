@@ -1,6 +1,8 @@
+import threading
 from multiprocessing import shared_memory
-from jobber import Jobber
+from jobber_slim import Jobber
 import time
+
 
 class JobberSHM:
     def __init__(self, size: int):
@@ -27,57 +29,107 @@ class JobberSHM:
 
 
 class JSubscriber:
-    def __init__(self, jshm: JobberSHM):
+    def __init__(
+        self,
+        name: str,
+        jshm: JobberSHM,
+        lock: threading.Lock
+    ):
+        self._name = name
         self._shm = jshm
+        self._lock = lock
         self._word: str = ''
 
     def listen(self):
         word = ''
-        while word != 'SHUTDOWN':
-            word = jshm.get()
+        while True:
+            if self._lock.locked():
+                continue
+
+            self._lock.acquire()
+            word = self._shm.get()
+            self._lock.release()
+
             if word != self._word:
-                print(f'{word} != {self._word}')
                 self._word = word
-        jshm.close()
+                print(f'{self._name}: {self._word}')
+
+            if word == 'SHUTDOWN':
+                break
+        print(f'{self._name} exit')
+
 
 class JPublisher:
-    def __init__(self, jshm: JobberSHM):
+    def __init__(
+        self,
+        jshm: JobberSHM,
+        lock: threading.Lock
+    ):
         self._shm = jshm
+        self._lock = lock
 
     def publish(self, word: str):
-        self._shm.put(word)
+        if not self._lock.locked():
+            self._lock.acquire()
+            self._shm.put(word)
+            self._lock.release()
+        else:
+            self.publish(word)
+            time.sleep(0.5)
 
     def shutdown(self):
-        self._shm.put('SHUTDOWN')
+        if not self._lock.locked():
+            self._lock.acquire()
+            self._shm.put('SHUTDOWN')
+            self._lock.release()
+        else:
+            self.shutdown()
+            time.sleep(0.5)
+
+        print('pub exit')
+        raise SystemExit(0)
+
 
 # set concunrrency (best is number of cores)
 # and initialize Jobber
-concurrency = 2
+concurrency = 4
 jobber = Jobber(concurrency)
 
 # get the decorator
 jobberd = jobber.decorator
 
 jshm = JobberSHM(32)
-pub = JPublisher(jshm)
-sub1 = JSubscriber(jshm)
-sub2 = JSubscriber(jshm)
+lock = threading.Lock()
+pub = JPublisher(jshm, lock)
+sub1 = JSubscriber('sub1', jshm, lock)
+sub2 = JSubscriber('sub2', jshm, lock)
 
-@jobberd
+
+@jobberd()
 def listener1():
     sub1.listen()
 
-@jobberd
+
+@jobberd()
 def listener2():
     sub2.listen()
 
 
-if __name__ == '__main__':
-    jobber.work()
-
+@jobberd()
+def writer():
     time.sleep(3)
     for i in range(3):
         pub.publish(f'Hello {i}')
         time.sleep(3)
 
     pub.shutdown()
+
+
+if __name__ == '__main__':
+    try:
+        jobber.work()
+        print('end')
+    except Exception as e:
+        print(e)
+
+    jshm.close()
