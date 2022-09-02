@@ -2,6 +2,7 @@ import threading
 from multiprocessing import shared_memory
 from jobber_slim import Jobber
 import time
+import signal
 
 
 class JobberSHM:
@@ -87,7 +88,6 @@ class JPublisher:
             time.sleep(0.5)
 
         print('pub exit')
-        raise SystemExit(0)
 
 
 # set concunrrency (best is number of cores)
@@ -123,9 +123,17 @@ def writer():
         time.sleep(3)
 
     pub.shutdown()
+    print('writer exit')
 
+
+def sigint_handler(sugnal, frame):
+    print(signal, frame)
+    jshm.close()
+    raise SystemExit(1)
 
 if __name__ == '__main__':
+    signal.signal(signal.SIGINT, sigint_handler)
+
     try:
         jobber.work()
         print('end')

@@ -1,10 +1,6 @@
 import threading
 from queue import Queue
-
-
-SUCCESS = "SUCCESS"
-FAIL = "FAIL"
-NOT_FOUND = "NOT_FOUND"
+import logging
 
 
 class CircularDependencyException(Exception):
@@ -40,11 +36,11 @@ class Jobber:
             return d.resolve()
         except CircularDependencyException as e:
             err_msg = "Circular dependency detected"
-            print(err_msg, e)
+            logging.error(err_msg, e)
             raise SystemExit(1)
         except DependencyNotFound as e:
             err_msg = "Dependency not found."
-            print(err_msg, e)
+            logging.error(err_msg, e)
             raise SystemExit(1)
 
     def work(self):
@@ -179,8 +175,9 @@ class JobberConsumer:
                 try:
                     self.tasks[task]()
                 except Exception as e:
-                    print(e)
+                    logging.error(e)
 
+            self.q_worker.put(["STOP"])
             self.q_worker.task_done()
 
     def start(self):
@@ -205,12 +202,9 @@ class JobberConsumer:
                     name="consumer_" + str(i))
                 t_worker.setDaemon(True)
                 t_worker.start()
-                print('started')
                 threads.append(t_worker)
 
             self.q_worker.join()
 
             for t_worker in threads:
-                print('joint')
                 t_worker.join()
-        print('j end')
