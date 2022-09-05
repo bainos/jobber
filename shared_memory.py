@@ -3,6 +3,7 @@ from multiprocessing import shared_memory
 from jobber_slim import Jobber
 import time
 import signal
+from abc import ABC, abstractmethod
 
 
 class JobberSHM:
@@ -11,53 +12,88 @@ class JobberSHM:
         self._shm = shared_memory.SharedMemory(create=True, size=size)
         self._buf = self._shm.buf
 
-    def put(self, word: str):
-        assert(isinstance(word, str))
-        assert(len(word) < self._size)
-        bword = word.encode()
-        self._buf[:len(bword)] = bword
+    def put(self, action: str):
+        assert(isinstance(action, str))
+        assert(len(action) < self._size)
+        baction = action.encode()
+        self._buf[:len(baction)] = baction
 
     def get(self) -> str:
-        word_arr = list()
+        action_arr = list()
         for b in self._buf:
             if b > 0:
-                word_arr.append(chr(b))
-        return ''.join(word_arr)
+                action_arr.append(chr(b))
+        return ''.join(action_arr)
 
     def close(self):
         self._shm.close()
         self._shm.unlink()
 
 
-class JSubscriber:
+class JSubscriber(ABC):
     def __init__(
         self,
         name: str,
         jshm: JobberSHM,
-        lock: threading.Lock
+        lock: threading.Lock,
+        states: tuple(str),
+        actions: tuple(str),
     ):
         self._name = name
         self._shm = jshm
         self._lock = lock
-        self._word: str = ''
+        self._states = states
+        self._actions = actions
+        self._state: str = ''
+        self._action: str = ''
+        self.triggers: dict = dict()
+        assert(isinstance(self._states, tuple))
+        assert(isinstance(self._actions, tuple))
+        assert(all(isinstance(s, str) for s in self._states))
+        assert(all(isinstance(s, str) for s in self._actions))
+        for action in self._actions:
+            try:
+                self.triggers[action]
+            except KeyError:
+                self.triggers[action] = dict()
+            for state in self._states:
+                self.triggers[action][state] = lambda *args: False
+
+    @property
+    @abstractmethod
+    def states(self):
+        return self._states
+
+    @property
+    @abstractmethod
+    def actions(self):
+        return self._actions
+
+    @abstractmethod
+    def handle_state(self):
+        pass
+
+    @abstractmethod
+    def handle_action(self):
+        pass
 
     def listen(self):
-        word = ''
+        # state = ''
+        action = ''
         while True:
             if self._lock.locked():
                 continue
 
-            self._lock.acquire()
-            word = self._shm.get()
-            self._lock.release()
+            # self._lock.acquire()
+            action = self._shm.get()
+            # self._lock.release()
 
-            if word != self._word:
-                self._word = word
-                print(f'{self._name}: {self._word}')
+            if action != self._action:
+                self._action = action
+                print(f'{self._name}: {self._action}')
 
-            if word == 'SHUTDOWN':
+            if action == 'SHUTDOWN':
                 break
-        print(f'{self._name} exit')
 
 
 class JPublisher:
@@ -69,13 +105,13 @@ class JPublisher:
         self._shm = jshm
         self._lock = lock
 
-    def publish(self, word: str):
+    def publish(self, action: str):
         if not self._lock.locked():
             self._lock.acquire()
-            self._shm.put(word)
+            self._shm.put(action)
             self._lock.release()
         else:
-            self.publish(word)
+            self.publish(action)
             time.sleep(0.5)
 
     def shutdown(self):
@@ -85,9 +121,7 @@ class JPublisher:
             self._lock.release()
         else:
             self.shutdown()
-            time.sleep(0.5)
-
-        print('pub exit')
+            time.sleep(0.1)
 
 
 # set concunrrency (best is number of cores)
@@ -123,13 +157,13 @@ def writer():
         time.sleep(3)
 
     pub.shutdown()
-    print('writer exit')
 
 
 def sigint_handler(sugnal, frame):
     print(signal, frame)
     jshm.close()
     raise SystemExit(1)
+
 
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, sigint_handler)
