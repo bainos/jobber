@@ -1,12 +1,12 @@
-import threading
+from threading import Lock
 from multiprocessing import shared_memory
-from jobber_slim import Jobber
+# from jobber_slim import Jobber
 import time
 import signal
-from abc import ABC, abstractmethod
+from enum import Enum, auto
 
 
-class JobberSHM:
+class JShm:
     def __init__(self, size: int):
         self._size: int = size
         self._shm = shared_memory.SharedMemory(create=True, size=size)
@@ -30,27 +30,20 @@ class JobberSHM:
         self._shm.unlink()
 
 
-class JSubscriber(ABC):
+class JPubSub(object):
+    __instance = None
+
     def __init__(
         self,
         name: str,
-        jshm: JobberSHM,
-        lock: threading.Lock,
-        states: tuple(str),
-        actions: tuple(str),
+        states: tuple,
+        actions: tuple,
     ):
         self._name = name
-        self._shm = jshm
-        self._lock = lock
         self._states = states
         self._actions = actions
-        self._state: str = ''
-        self._action: str = ''
         self.triggers: dict = dict()
-        assert(isinstance(self._states, tuple))
-        assert(isinstance(self._actions, tuple))
-        assert(all(isinstance(s, str) for s in self._states))
-        assert(all(isinstance(s, str) for s in self._actions))
+
         for action in self._actions:
             try:
                 self.triggers[action]
@@ -59,119 +52,119 @@ class JSubscriber(ABC):
             for state in self._states:
                 self.triggers[action][state] = lambda *args: False
 
-    @property
-    @abstractmethod
-    def states(self):
-        return self._states
+    def __new__(cls):
+        if JPubSub.__instance is None:
+            JPubSub.__instance = object.__new__(cls)
 
-    @property
-    @abstractmethod
-    def actions(self):
-        return self._actions
-
-    @abstractmethod
-    def handle_state(self):
-        pass
-
-    @abstractmethod
-    def handle_action(self):
-        pass
+        JPubSub.__instance._lock = Lock()
+        JPubSub.__instance._state = None
+        JPubSub.__instance._action = None
+        return JPubSub.__instance
 
     def listen(self):
-        # state = ''
-        action = ''
+        action = self._action
         while True:
             if self._lock.locked():
                 continue
 
-            # self._lock.acquire()
-            action = self._shm.get()
-            # self._lock.release()
-
             if action != self._action:
-                self._action = action
-                print(f'{self._name}: {self._action}')
+                action = self._action
+                self.triggers[action][self._state]()
 
-            if action == 'SHUTDOWN':
+            if self._action == 'SHUTDOWN':
                 break
 
-
-class JPublisher:
-    def __init__(
-        self,
-        jshm: JobberSHM,
-        lock: threading.Lock
-    ):
-        self._shm = jshm
-        self._lock = lock
-
-    def publish(self, action: str):
+    def shout(self, action: str):
         if not self._lock.locked():
             self._lock.acquire()
-            self._shm.put(action)
+            self._action = action
             self._lock.release()
         else:
-            self.publish(action)
-            time.sleep(0.5)
-
-    def shutdown(self):
-        if not self._lock.locked():
-            self._lock.acquire()
-            self._shm.put('SHUTDOWN')
-            self._lock.release()
-        else:
-            self.shutdown()
+            self.shout(action)
             time.sleep(0.1)
 
-
-# set concunrrency (best is number of cores)
-# and initialize Jobber
-concurrency = 4
-jobber = Jobber(concurrency)
-
-# get the decorator
-jobberd = jobber.decorator
-
-jshm = JobberSHM(32)
-lock = threading.Lock()
-pub = JPublisher(jshm, lock)
-sub1 = JSubscriber('sub1', jshm, lock)
-sub2 = JSubscriber('sub2', jshm, lock)
+    def shutdown(self):
+        self.shout('SHUTDOWN')
 
 
-@jobberd()
-def listener1():
-    sub1.listen()
+class States(Enum):
+    WAIT = 0
+    COMMAND = auto()
+    INSERT = auto()
+    VISUAL = auto()
+    PLAYBACK = auto()
 
 
-@jobberd()
-def listener2():
-    sub2.listen()
+class Events(Enum):
+    CURSOR_MOVE = 0
+    K_LEFT = auto()
+    K_UP = auto()
+    K_RIGHT = auto()
+    K_DOWN = auto()
 
 
-@jobberd()
-def writer():
-    time.sleep(3)
-    for i in range(3):
-        pub.publish(f'Hello {i}')
-        time.sleep(3)
+class ComponentBase(JPubSub):
+    def __init__(self, name: str):
+        super().__init__(
+            name = name,
+            states = States(),
+            actions = Events(),
+        )
 
-    pub.shutdown()
+class Component1(ComponentBase):
+    def __init__(self):
+        super().__init__('Component1')
+        
 
+
+# # set concunrrency (best is number of cores)
+# # and initialize Jobber
+# concurrency = 4
+# jobber = Jobber(concurrency)
+
+# # get the decorator
+# jobberd = jobber.decorator
 
 def sigint_handler(sugnal, frame):
     print(signal, frame)
-    jshm.close()
     raise SystemExit(1)
+
+
+class Borg(object):
+    __instance = None
+
+    def __new__(cls, val):
+        if Borg.__instance is None:
+            Borg.__instance = object.__new__(cls)
+        Borg.__instance.val = val
+        return Borg.__instance
+
+    def set_val(self, val):
+        self.val = val
+
+
+class Singleton(Borg):
+    def __init__(self, arg):
+        self.val = arg
+
+    def __str__(self): return self.val
 
 
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, sigint_handler)
 
-    try:
-        jobber.work()
-        print('end')
-    except Exception as e:
-        print(e)
+    a = Singleton('A')
+    b = Singleton('B')
+    c = Singleton('C')
 
-    jshm.close()
+    print(a)
+    print(b)
+    print(c)
+    a.set_val('UO')
+    print(a)
+    print(b)
+    print(c)
+    b.val = 'SORBOLE!'
+    print(a)
+    print(b)
+    print(c)
