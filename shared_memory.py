@@ -1,9 +1,10 @@
 from threading import Lock
 from multiprocessing import shared_memory
-# from jobber_slim import Jobber
+from jobber_slim import Jobber
 import time
 import signal
 from enum import Enum, auto
+from abc import ABCMeta, abstractmethod
 
 
 class JShm:
@@ -30,57 +31,61 @@ class JShm:
         self._shm.unlink()
 
 
-class JPubSub(object):
-    __instance = None
+class JPubSub(metaclass=ABCMeta):
 
     def __init__(
         self,
-        name: str,
-        states: tuple,
-        actions: tuple,
+        states: Enum,
+        events: Enum,
     ):
-        self._name = name
         self._states = states
-        self._actions = actions
+        self._events = events
         self.triggers: dict = dict()
 
-        for action in self._actions:
+        for event in self._events:
             try:
-                self.triggers[action]
+                self.triggers[event.value]
             except KeyError:
-                self.triggers[action] = dict()
+                self.triggers[event.value] = dict()
             for state in self._states:
-                self.triggers[action][state] = lambda *args: False
+                self.triggers[event.value][state.value] = lambda *args: False
 
-    def __new__(cls):
-        if JPubSub.__instance is None:
-            JPubSub.__instance = object.__new__(cls)
+    __instance = None
 
-        JPubSub.__instance._lock = Lock()
-        JPubSub.__instance._state = None
-        JPubSub.__instance._action = None
-        return JPubSub.__instance
+    @classmethod
+    def singleton(cls, name):
+        if cls.__instance is None:
+            cls.__instance = cls.create_singleton(name)
+            cls.__instance.lock = Lock()
+            cls.__instance.state = None
+            cls.__instance.event = None
+        return cls.__instance
+
+    @classmethod
+    @abstractmethod
+    def create_singleton(cls, name):
+        ...
 
     def listen(self):
-        action = self._action
+        event = self.event
         while True:
-            if self._lock.locked():
+            if self.lock.locked():
                 continue
 
-            if action != self._action:
-                action = self._action
-                self.triggers[action][self._state]()
+            if event != self.event:
+                event = self.event
+                self.triggers[event.value][self.state.value]()
 
-            if self._action == 'SHUTDOWN':
+            if self.event == 'SHUTDOWN':
                 break
 
-    def shout(self, action: str):
-        if not self._lock.locked():
-            self._lock.acquire()
-            self._action = action
-            self._lock.release()
+    def shout(self, event):
+        if not self.lock.locked():
+            self.lock.acquire()
+            self.event = event
+            self.lock.release()
         else:
-            self.shout(action)
+            self.shout(event)
             time.sleep(0.1)
 
     def shutdown(self):
@@ -104,67 +109,121 @@ class Events(Enum):
 
 
 class ComponentBase(JPubSub):
-    def __init__(self, name: str):
+    def __init__(self):
         super().__init__(
-            name = name,
-            states = States(),
-            actions = Events(),
+            states = States,
+            events = Events,
         )
 
+    @classmethod
+    def create_singleton(cls, name='ComponentBase'):
+        return ComponentBase()
+
 class Component1(ComponentBase):
-    def __init__(self):
-        super().__init__('Component1')
-        
+    def __init__(self, name: str):
+        super().__init__()
+        self.name = name
+        self.triggers[self._states.WAIT.value][self._events.CURSOR_MOVE.value] = self.on_wait_cursor_move
+        self.triggers[self._states.INSERT.value][self._events.K_UP.value] = self.on_insert_k_up
+
+    @classmethod
+    def create_singleton(cls, name):
+        return Component1(name)
+
+    def _helper(self):
+        print(f"{self.name}: {self.event} | {self.state}")
+
+    def on_wait_cursor_move(self):
+        self._helper()
+
+    def on_insert_k_up(self):
+        self._helper()
+
+class Component2(ComponentBase):
+    def __init__(self, name: str):
+        super().__init__()
+        self.name = name
+        self.triggers[self._states.WAIT.value][self._events.CURSOR_MOVE.value] = self.on_wait_cursor_move
+        self.triggers[self._states.INSERT.value][self._events.K_DOWN.value] = self.on_insert_k_down
+
+    @classmethod
+    def create_singleton(cls, name):
+        return Component2(name)
+
+    def _helper(self):
+        print(f"{self.name}: {self.event} | {self.state}")
+
+    def on_wait_cursor_move(self):
+        self._helper()
+
+    def on_insert_k_down(self):
+        self._helper()
 
 
 # # set concunrrency (best is number of cores)
 # # and initialize Jobber
-# concurrency = 4
-# jobber = Jobber(concurrency)
+concurrency = 4
+jobber = Jobber(concurrency)
 
-# # get the decorator
-# jobberd = jobber.decorator
+# get the decorator
+jobberd = jobber.decorator
 
 def sigint_handler(sugnal, frame):
     print(signal, frame)
     raise SystemExit(1)
 
 
-class Borg(object):
-    __instance = None
+# class Borg(object):
+#     __instance = None
 
-    def __new__(cls, val):
-        if Borg.__instance is None:
-            Borg.__instance = object.__new__(cls)
-        Borg.__instance.val = val
-        return Borg.__instance
+#     def __new__(cls, val):
+#         if Borg.__instance is None:
+#             Borg.__instance = object.__new__(cls)
+#         Borg.__instance.val = val
+#         return Borg.__instance
 
-    def set_val(self, val):
-        self.val = val
+#     def set_val(self, val):
+#         self.val = val
 
 
-class Singleton(Borg):
-    def __init__(self, arg):
-        self.val = arg
+# class Singleton(Borg):
+#     def __init__(self, arg):
+#         self.val = arg
 
-    def __str__(self): return self.val
+#     def __str__(self): return self.val
 
 
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, sigint_handler)
 
-    a = Singleton('A')
-    b = Singleton('B')
-    c = Singleton('C')
+    c2 = Component1.singleton('c1-pluto')
+    c1 = Component1.singleton('c1-pippo')
+    c3 = Component2.singleton('c2-paperino')
+    c4 = Component2.singleton('c2-paperone')
 
-    print(a)
-    print(b)
-    print(c)
-    a.set_val('UO')
-    print(a)
-    print(b)
-    print(c)
-    b.val = 'SORBOLE!'
-    print(a)
-    print(b)
-    print(c)
+    print(c1.name, c1.state)
+    print(c2.name, c2.state)
+    print(c3.name, c3.state)
+    print(c4.name, c4.state)
+
+    c1.state = States.WAIT
+
+    print(c1.name, c1.state)
+    print(c2.name, c2.state)
+    print(c3.name, c3.state)
+    print(c4.name, c4.state)
+    # a = Singleton('A')
+    # b = Singleton('B')
+    # c = Singleton('C')
+
+    # print(a)
+    # print(b)
+    # print(c)
+    # a.set_val('UO')
+    # print(a)
+    # print(b)
+    # print(c)
+    # b.val = 'SORBOLE!'
+    # print(a)
+    # print(b)
+    # print(c)
